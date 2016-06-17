@@ -6,10 +6,8 @@ import java.io.IOException;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
 
-/**
- * Created by serious on 2015-10-10.
- */
-public class Zip {
+
+public class ZipUtils {
 	
 	public static byte[] zipBytes(byte[] input) {
 		try {
