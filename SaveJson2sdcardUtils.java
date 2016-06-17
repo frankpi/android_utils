@@ -5,7 +5,7 @@ import java.io.FileOutputStream;
 
 import android.os.Environment;
 
-public class SaveJsonUtils {
+public class SaveJson2sdcardUtils {
 
 	public static boolean saveJson2sdcard(String json, String name) {
 		File file = new File(Environment.getExternalStorageDirectory()
