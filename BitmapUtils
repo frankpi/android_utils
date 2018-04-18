@@ -1,0 +1,325 @@
+package com.gameassist.plugin.utils;
+
+import android.app.AppOpsManager;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
+import android.graphics.Rect;
+import android.graphics.RectF;
+import android.net.Uri;
+import android.os.Binder;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
+import android.widget.ImageView;
+import android.widget.Toast;
+
+import com.gameassist.plugin.PluginEntry;
+import com.gameassist.plugin.center.crack.R;
+import com.gameassist.plugin.common.MyLog;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+
+public class CommonUtils {
+
+
+    private static long lastClickTime;
+
+    public synchronized static boolean isFastClick() {
+        long time = System.currentTimeMillis();
+        if (time - lastClickTime < 1000) {
+            return true;
+        }
+        lastClickTime = time;
+        return false;
+    }
+
+
+    private boolean getSupportList(PluginEntry pluginEntry) {
+        ApplicationInfo appInfo;
+        String error = pluginEntry.getContext().getResources().getString(R.string.error_support);
+        appInfo = pluginEntry.getPluginInfo().applicationInfo;
+        if (null == appInfo) return false;
+        try {
+            String targetvc = String.valueOf(pluginEntry.getTargetApplication().getPackageManager().getPackageInfo(pluginEntry.getTargetApplication().getPackageName(), 0).versionCode);
+          //  MyLog.e("name" + pluginEntry.getPluginName() + "vc" + targetvc);
+            Bundle metaData = appInfo.metaData;
+            MyLog.e("GameInfoList" + metaData.getString("GameInfoList"));
+            JSONArray gameInfoList = new JSONArray(metaData.getString("GameInfoList"));
+            for (int i = 0; i < gameInfoList.length(); i++) {
+                JSONObject j = gameInfoList.getJSONObject(i);
+               // MyLog.e("j" + j.toString());
+              //  MyLog.e("target" + pluginEntry.getTargetApplication().getPackageName());
+                if (j.getString("pkgName").equals(pluginEntry.getTargetApplication().getPackageName())) {
+                    if (j.getString("supportVerCode").contentEquals("*")) {
+                        return true;
+                    }
+                    if (j.getString("supportVerCode").contains(targetvc)) {
+                        return true;
+                    }
+                    error = pluginEntry.getContext().getResources().getString(R.string.error_support) + " VersionCode";
+                } else {
+                    error = pluginEntry.getContext().getResources().getString(R.string.error_support) + " PackageName";
+                }
+            }
+        } catch (JSONException | PackageManager.NameNotFoundException e) {
+            MyLog.e(e.getMessage());
+            error = pluginEntry.getContext().getResources().getString(R.string.error_support) + " Exception";
+        }
+        return false;
+    }
+
+
+    public static void applyCommonPermission(Context context) {
+        try {
+            Class clazz = Settings.class;
+            Field field = clazz.getDeclaredField("ACTION_MANAGE_OVERLAY_PERMISSION");
+            Intent intent = new Intent(field.get(null).toString());
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            intent.setData(Uri.parse("package:" + context.getPackageName()));
+            context.startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(context, "进入设置页面失败，请手动设置", Toast.LENGTH_LONG).show();
+        }
+    }
+
+
+    // TODO: 2017/10/24 检查悬浮窗
+    public static boolean checkFloatWindowPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return Settings.canDrawOverlays(PluginEntry.targetContext);
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
+            //AppOpsManager添加于API 19
+            return checkOps();
+        } else {
+            //4.4以下一般都可以直接添加悬浮窗
+            return true;
+        }
+    }
+
+    private static boolean checkOps() {
+        try {
+            Object object = PluginEntry.targetContext.getSystemService(Context.APP_OPS_SERVICE);
+            if (object == null) {
+                return false;
+            }
+            Class localClass = object.getClass();
+            Class[] arrayOfClass = new Class[3];
+            arrayOfClass[0] = Integer.TYPE;
+            arrayOfClass[1] = Integer.TYPE;
+            arrayOfClass[2] = String.class;
+            Method method = localClass.getMethod("checkOp", arrayOfClass);
+            if (method == null) {
+                return false;
+            }
+            Object[] arrayOfObject1 = new Object[3];
+            arrayOfObject1[0] = 24;
+            arrayOfObject1[1] = Binder.getCallingUid();
+            arrayOfObject1[2] = PluginEntry.targetContext.getPackageName();
+            int m = (Integer) method.invoke(object, arrayOfObject1);
+            //4.4至6.0之间的非国产手机，例如samsung，sony一般都可以直接添加悬浮窗
+            return m == AppOpsManager.MODE_ALLOWED;// || !isDomesticSpecialRom();
+        } catch (Exception ignore) {
+        }
+        return false;
+    }
+
+
+    private static Bitmap makeRoundCorner(Bitmap bitmap) {
+        int width = bitmap.getWidth();
+        int height = bitmap.getHeight();
+        int left = 0, top = 0, right = width, bottom = height;
+        float roundPx = height / 2;
+        if (width > height) {
+            left = (width - height) / 2;
+            top = 0;
+            right = left + height;
+            bottom = height;
+        } else if (height > width) {
+            left = 0;
+            top = (height - width) / 2;
+            right = width;
+            bottom = top + width;
+            roundPx = width / 2;
+        }
+        Bitmap output = Bitmap.createBitmap(width, height,
+                Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(output);
+        int color = 0xff424242;
+        Paint paint = new Paint();
+        Rect rect = new Rect(left, top, right, bottom);
+        RectF rectF = new RectF(rect);
+
+        paint.setAntiAlias(true);
+        canvas.drawARGB(0, 0, 0, 0);
+        paint.setColor(color);
+        canvas.drawRoundRect(rectF, roundPx, roundPx, paint);
+        paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
+        canvas.drawBitmap(bitmap, rect, rect, paint);
+        return output;
+    }
+
+    public static String dateFormat(String strdate) {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+        SimpleDateFormat sdf2 = new SimpleDateFormat("MM-dd");
+        try {
+            strdate = sdf2.format(sdf.parse(strdate));
+        } catch (ParseException e) {
+            e.printStackTrace();
+        }
+        return strdate;
+    }
+
+
+    /**
+     * 加载图片
+     *
+     * @param imageView
+     * @param url
+     */
+    public static void loadImageRound(final ImageView imageView, final String url) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                MyLog.e("<loadImageRoundReward> bad url ... %s", url);
+                Bitmap finalRes;
+                try {
+                    if (!url.startsWith("http")) {
+                        MyLog.e("<loadImageRoundReward> bad url ... %s", url);
+                        return;
+                    }
+                    finalRes = BitmapFactory.decodeStream(getInpuStream(url));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    MyLog.e("<loadImageRoundReward>" + e.getMessage());
+                    finalRes = BitmapFactory.decodeResource(PluginEntry.getInstance().getContext().getResources(), R.drawable.icon);
+                }
+                final Bitmap finalRes1 = finalRes;
+                new Handler(Looper.getMainLooper()).post(new Runnable() {
+                    @Override
+                    public void run() {
+                        MyLog.e("<loadImageRoundReward>" + (finalRes1 == null));
+                        if (finalRes1 != null) {
+                            imageView.setImageBitmap(makeRoundCorner(finalRes1));
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+
+    /**
+     * 加载图片
+     *
+     * @param imageView
+     * @param url
+     */
+    public static void loadImage(final ImageView imageView, final String url) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                Bitmap finalRes;
+                try {
+                    if (!url.startsWith("http")) {
+                        MyLog.e("<loadImageRoundReward> bad url ... %s", url);
+                        return;
+                    }
+                    finalRes = BitmapFactory.decodeStream(getInpuStream(url));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    MyLog.e("<loadImageRoundReward>" + e.getMessage());
+                    finalRes = BitmapFactory.decodeResource(PluginEntry.getInstance().getContext().getResources(), R.drawable.icon);
+                }
+                final Bitmap finalRes1 = finalRes;
+                new Handler(Looper.getMainLooper()).post(new Runnable() {
+                    @Override
+                    public void run() {
+                        MyLog.e("<loadImageRoundReward>" + (finalRes1 == null));
+                        if (finalRes1 != null) {
+                            imageView.setImageBitmap(finalRes1);
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+
+    private static InputStream getInpuStream(String url) {
+        HttpURLConnection urlConnection = null;
+        try {
+            urlConnection = (HttpURLConnection) new URL(url).openConnection();
+            int code = urlConnection.getResponseCode();
+            if (code == 302) {
+                String location = urlConnection.getHeaderField("Location");
+                return getInpuStream(location);
+            } else if (urlConnection.getResponseCode() == 200) {
+                return urlConnection.getInputStream();
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+
+
+
+
+    public static String getLocalVersionName(Context ctx) {
+        MyLog.e("apk: "+ctx.getPackageName());
+        String localVersion = "";
+        try {
+            PackageInfo packageInfo = ctx.getApplicationContext()
+                    .getPackageManager()
+                    .getPackageInfo(ctx.getPackageName(), 0);
+            localVersion = packageInfo.versionName;
+            MyLog.e("本软件的版本号。。" + localVersion);
+        } catch (PackageManager.NameNotFoundException e) {
+            e.printStackTrace();
+        }
+        return localVersion;
+    }
+
+    public static String getCommandLineOutput(String cmdLine) {
+        String output = "";
+        try {
+            Process p = Runtime.getRuntime().exec(cmdLine);
+            BufferedReader input = new BufferedReader(new InputStreamReader(p.getInputStream()));
+            String line;
+            while ((line = input.readLine()) != null) {
+                output += (line + '\n');
+            }
+            input.close();
+        } catch (Exception e) {
+        }
+        return output;
+    }
+
+
+
+}
